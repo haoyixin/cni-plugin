@@ -38,6 +38,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"time"
+	"k8s.io/apimachinery/pkg/util/rand"
 )
 
 // CmdAddK8s performs the "ADD" operation on a kubernetes pod
@@ -644,11 +646,20 @@ func newK8sClient(conf types.NetConf, logger *logrus.Entry) (*kubernetes.Clients
 }
 
 func getK8sPodInfo(client *kubernetes.Clientset, podName, podNamespace string) (labels map[string]string, annotations map[string]string, ports []api.EndpointPort, err error) {
-	pod, err := client.CoreV1().Pods(string(podNamespace)).Get(podName, metav1.GetOptions{})
-	logrus.Infof("pod info %+v", pod)
+fetch:
+	pod, err := client.CoreV1().Pods(podNamespace).Get(podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	state, ok := pod.Annotations["cni.projectcalico.org/externalIpamState"]
+	if ok && state == "active" {
+		logrus.Infof("waiting for external ipam")
+		time.Sleep(time.Duration(rand.IntnRange(1000, 2000)) * time.Microsecond)
+		goto fetch
+	}
+
+	logrus.Infof("pod info %+v", pod)
 
 	var c k8sconversion.Converter
 	kvp, err := c.PodToWorkloadEndpoint(pod)
